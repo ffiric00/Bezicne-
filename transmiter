@@ -1,0 +1,105 @@
+#include <Arduino.h>
+#include <SPI.h>
+#include <nRF24L01.h>
+#include <RF24.h>
+
+#define CE_PIN 9
+#define CSN_PIN 10
+
+#define sensorPin 7
+
+const byte address[6] = {"1node"};
+RF24 radio(CE_PIN, CSN_PIN);
+int SoundSensor = A4; // LM393 Sound Sensor Digital Pin D0 connected to pin 2
+int LED = 13;         // LED connected to pin 3
+boolean LEDStatus = false;
+
+unsigned long currentMillis;
+unsigned long prevMillis;
+unsigned long txIntervalMillis = 10000; // send once every 10 seconds int lastSoundValue;
+
+int lastSoundValue;
+int soundValue;
+long lastNoiseTime = 0;
+long currentNoiseTime = 0;
+long lastLightChange = 0;
+int relayStatus = HIGH;
+int clap_interval = 500;
+int claps = 0;
+
+void send();
+void setup()
+{
+  pinMode(SoundSensor, INPUT);
+  pinMode(LED, OUTPUT);
+
+  radio.begin();
+  radio.setDataRate(RF24_250KBPS);
+  radio.setChannel(111);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.setRetries(3, 5); // delay, count
+  radio.openWritingPipe(address);
+
+  randomSeed(analogRead(0));
+
+  Serial.begin(9600);
+}
+void loop()
+{
+  soundValue = analogRead(SoundSensor);
+  currentNoiseTime = millis();
+  if (soundValue >= 850 && lastSoundValue == 0)
+  {
+    if (claps == 0) // allow first to register without much condition
+    {
+      claps = 1;
+      lastNoiseTime = currentNoiseTime;
+    }
+    else
+    {
+      if (currentNoiseTime > lastNoiseTime + clap_interval)
+      {
+        claps++;
+        lastNoiseTime = currentNoiseTime;
+        relayStatus = !relayStatus;
+      }
+    }
+  }
+  else
+  {
+    if (currentNoiseTime > lastNoiseTime + 2 * clap_interval) // no claps for a longer duration time to print and/or reset clap
+    {
+      if (claps > 0)
+      {
+        Serial.print(claps);
+        Serial.println(" CLAPS");
+        claps = 0; /// reset
+      }
+    }
+  }
+  lastSoundValue = soundValue;
+  delay(50); // delay polling
+}
+
+void send()
+{
+  int SensorData = analogRead(SoundSensor);
+  Serial.println(SensorData); // print the value
+  bool rslt;
+
+  rslt = radio.write(&SensorData, sizeof(SensorData));
+  // Always use sizeof() as it gives the size as the number of bytes.
+  // For example if dataToSend was an int sizeof() would correctly return 2
+
+  Serial.print("Data Sent ");
+  Serial.print(SensorData);
+
+  if (rslt)
+  {
+    Serial.println("  Acknowledge received");
+  }
+  else
+  {
+    Serial.println("  Tx failed");
+  }
+}
